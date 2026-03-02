@@ -9,6 +9,7 @@ let isPending = false;
 let lastMouseDown = null;       // track drag gestures for Google Docs fallback
 let lastDoubleClick = 0;
 let lastExplainTrigger = 0;    // prevents mouseup after button click from killing the panel
+let lastSelectionEventAt = 0;   // dedupe pointerup/mouseup cascades
 
 // Load stored language preference
 chrome.storage.sync.get({ defaultLang: 'zh' }, ({ defaultLang }) => {
@@ -30,7 +31,13 @@ document.addEventListener('dblclick', () => { lastDoubleClick = Date.now(); }, t
 
 // ─── Google Docs Helpers ─────────────────────────────────────────────────────
 function isGoogleDocs() {
-  return location.hostname === 'docs.google.com';
+  if (location.hostname === 'docs.google.com') return true;
+  if (document.referrer?.includes('docs.google.com')) return true;
+  try {
+    return window.top?.location?.hostname === 'docs.google.com';
+  } catch {
+    return false;
+  }
 }
 
 // Did the user perform a gesture that likely means text selection?
@@ -43,82 +50,122 @@ function wasSelectionGesture(e) {
       || Math.abs(e.clientY - lastMouseDown.y) > 5;
 }
 
-// Read clipboard text via execCommand('paste') into an off-screen textarea.
-// Requires the "clipboardRead" permission in manifest.json.
-function readClipboardText() {
-  const prev = document.activeElement;
-  const ta = document.createElement('textarea');
-  ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;pointer-events:none';
-  document.body.appendChild(ta);
-  ta.focus();
-  document.execCommand('paste');
-  const text = ta.value;
-  ta.remove();
-  try { if (prev) prev.focus(); } catch { /* ignore */ }
-  return text;
+// Trigger a copy of Google Docs' canvas selection to the system clipboard.
+// Must be called synchronously during a user-gesture (mouseup) so that
+// execCommand('copy') fires a trusted copy event that Google Docs can
+// intercept.
+function triggerGoogleDocsCopy() {
+  try {
+    document.execCommand('copy');
+    return true;
+  } catch { return false; }
 }
 
-// Attempt to read Google Docs' internal selection via the clipboard.
-// Must be called synchronously during a user-gesture (mouseup) — NOT inside
-// a setTimeout, which forfeits the gesture context and makes execCommand
-// silently fail.  Returns the selected text, or '' if it can't be captured.
-function captureGoogleDocsSelection() {
-  try {
-    // 1. Snapshot what's already on the clipboard
-    const before = readClipboardText() || '';
+// Capture Google Docs selected text from the trusted copy event. This is
+// more reliable than reading navigator.clipboard on Docs, where clipboard
+// reads can be blocked by page policies.
+function captureGoogleDocsCopiedText() {
+  return new Promise((resolve) => {
+    let settled = false;
 
-    // 2. readClipboardText() restored focus to Google Docs' editor.
-    //    Now execCommand('copy') fires a trusted copy event on that element.
-    //    Google Docs intercepts it and writes its canvas selection to the
-    //    system clipboard.
-    document.execCommand('copy');
+    const done = (text) => {
+      if (settled) return;
+      settled = true;
+      document.removeEventListener('copy', onCopy, false);
+      resolve((text || '').trim());
+    };
 
-    // 3. Read the clipboard again
-    const after = readClipboardText() || '';
+    const onCopy = (event) => {
+      try {
+        const copied = event.clipboardData?.getData('text/plain') || '';
+        done(copied);
+      } catch {
+        done('');
+      }
+    };
 
-    // 4. Only trust the result if the clipboard actually changed — this
-    //    prevents stale clipboard content from being used as "selected text".
-    if (after && after.trim() !== before.trim()) {
-      return after.trim();
+    // Bubble phase is important on Docs: their copy handler often sets the
+    // clipboard payload after capture listeners have already run.
+    document.addEventListener('copy', onCopy, false);
+    if (!triggerGoogleDocsCopy()) {
+      done('');
+      return;
     }
-  } catch { /* clipboard not available */ }
+    setTimeout(() => done(''), 120);
+  });
+}
+
+function getSelectionTextFromFrameTree(rootWin, depth = 0) {
+  if (!rootWin || depth > 4) return '';
+  try {
+    const text = rootWin.getSelection?.().toString().trim();
+    if (text && text.length >= 2) return text;
+  } catch { /* ignore */ }
+
+  try {
+    const frames = rootWin.document?.querySelectorAll('iframe, frame') || [];
+    for (const frame of frames) {
+      let subWin = null;
+      try { subWin = frame.contentWindow; } catch { /* ignore */ }
+      const subText = getSelectionTextFromFrameTree(subWin, depth + 1);
+      if (subText) return subText;
+    }
+  } catch { /* ignore */ }
   return '';
 }
 
 // ─── Selection ───────────────────────────────────────────────────────────────
-function handleSelectionChange(e) {
+async function handleSelectionChange(e) {
   // The mouseup/pointerup from clicking the explain button would otherwise
   // run this handler, find no selection, and call hideAll() — killing the
   // panel that was just opened.  Ignore events that arrive within 500 ms
   // of the last explain trigger.
   if (Date.now() - lastExplainTrigger < 500) return;
+  if (e && (e.type === 'mouseup' || e.type === 'pointerup')) {
+    const now = Date.now();
+    if (now - lastSelectionEventAt < 80) return;
+    lastSelectionEventAt = now;
+  }
 
   const onGoogleDocs = isGoogleDocs();
 
-  // For Google Docs canvas mode: capture clipboard text NOW, while the
-  // user-gesture is still active.  document.execCommand('copy') requires
-  // user-activation which a setTimeout would forfeit.
-  let gdocsText = '';
+  // For Google Docs canvas mode: trigger a copy NOW while the user-gesture
+  // is still active.  execCommand('copy') requires user-activation which a
+  // setTimeout would forfeit.  We read the clipboard later asynchronously
+  // using navigator.clipboard.readText(), which is reliable with the
+  // "clipboardRead" permission.
+  let gdocsCopied = false;
+  let gdocsCopiedText = '';
   if (onGoogleDocs && wasSelectionGesture(e)) {
-    gdocsText = captureGoogleDocsSelection();
+    gdocsCopiedText = await captureGoogleDocsCopiedText();
+    gdocsCopied = !!gdocsCopiedText;
   }
 
   const delay = onGoogleDocs ? 200 : 60;
 
-  setTimeout(() => {
+  setTimeout(async () => {
     const selection = window.getSelection();
     let text = selection?.toString().trim();
 
-    // Google Docs canvas mode: window.getSelection() returns empty because
-    // text is rendered on <canvas>, not in DOM nodes.  Use the clipboard
-    // text we captured earlier (if the copy succeeded).
-    if ((!text || text.length < 2) && gdocsText.length >= 2) {
-      text = gdocsText;
+    if ((!text || text.length < 2) && onGoogleDocs) {
+      text = getSelectionTextFromFrameTree(window);
     }
 
-    if (!text || text.length < 2) { hideAll(); return; }
+    // Google Docs canvas mode: window.getSelection() returns empty because
+    // text is rendered on <canvas>, not in DOM nodes.  Read the clipboard
+    // that we copied during the user gesture.
+    if ((!text || text.length < 2) && gdocsCopiedText) {
+      text = gdocsCopiedText;
+    }
 
-    selectedText = text;
+    if ((!text || text.length < 2) && gdocsCopied) {
+      try {
+        const clipText = await navigator.clipboard.readText();
+        if (clipText && clipText.trim().length >= 2) {
+          text = clipText.trim();
+        }
+      } catch { /* clipboard not available */ }
+    }
 
     // Try to use the real selection rect; fall back to mouse cursor position
     // (Google Docs returns zero-sized rects for its hidden selection layer)
@@ -135,6 +182,23 @@ function handleSelectionChange(e) {
       rect = { top: e.clientY, bottom: e.clientY, left: e.clientX, right: e.clientX };
     }
 
+    if (onGoogleDocs) {
+      // On Docs, selection extraction is often unreliable at mouseup time.
+      // Show the button after a real selection gesture, then capture text on
+      // button click (fresh user gesture).
+      if (!wasSelectionGesture(e)) return;
+      if (!rect && e) {
+        rect = { top: e.clientY, bottom: e.clientY, left: e.clientX, right: e.clientX };
+      }
+      if (!rect) return;
+      selectionRect = rect;
+      selectedText = text && text.length >= 2 ? text : '';
+      showExplainButton(selectionRect);
+      return;
+    }
+
+    if (!text || text.length < 2) { hideAll(); return; }
+    selectedText = text;
     if (!rect) return;
     selectionRect = rect;
     showExplainButton(selectionRect);
@@ -157,12 +221,38 @@ function showExplainButton(rect) {
 }
 
 // ─── Explanation Flow ─────────────────────────────────────────────────────────
-function triggerExplanation() {
+async function triggerExplanation() {
   lastExplainTrigger = Date.now();
   removeElement(explainBtn);
   explainBtn = null;
   conversationHistory = [];
   isPending = false;
+
+  if (isGoogleDocs() && (!selectedText || selectedText.length < 2)) {
+    let docsText = await captureGoogleDocsCopiedText();
+    if ((!docsText || docsText.length < 2)) {
+      docsText = getSelectionTextFromFrameTree(window);
+    }
+    if ((!docsText || docsText.length < 2)) {
+      try {
+        const clipText = await navigator.clipboard.readText();
+        if (clipText && clipText.trim().length >= 2) docsText = clipText.trim();
+      } catch { /* clipboard not available */ }
+    }
+
+    if (!docsText || docsText.length < 2) {
+      showPanel();
+      addLoadingMessage();
+      resolveLoadingMessage(
+        language === 'zh'
+          ? '未检测到 Google Docs 选中文本。请先高亮文本后再点 Explain。'
+          : 'No Google Docs selection found. Highlight text first, then click Explain.',
+        true
+      );
+      return;
+    }
+    selectedText = docsText;
+  }
 
   showPanel();
 
@@ -177,10 +267,12 @@ function triggerExplanation() {
 }
 
 function callAPI() {
+  const runtime = globalThis.chrome?.runtime;
+
   // After the extension is reloaded, old content scripts lose their
   // connection to the runtime.  Detect this and show a friendly message
   // instead of throwing "Extension context invalidated".
-  if (!chrome.runtime?.id) {
+  if (!runtime?.id || typeof runtime.sendMessage !== 'function') {
     resolveLoadingMessage(
       language === 'zh'
         ? '扩展已更新，请刷新此页面后重试。'
@@ -194,26 +286,46 @@ function callAPI() {
   isPending = true;
   setSendDisabled(true);
 
-  chrome.runtime.sendMessage(
-    { type: 'EXPLAIN', messages: conversationHistory, language },
-    (response) => {
-      isPending = false;
-      setSendDisabled(false);
+  try {
+    runtime.sendMessage(
+      { type: 'EXPLAIN', messages: conversationHistory, language },
+      (response) => {
+        isPending = false;
+        setSendDisabled(false);
 
-      if (chrome.runtime.lastError) {
-        resolveLoadingMessage(chrome.runtime.lastError.message, true);
-        conversationHistory.pop();
-        return;
+        if (runtime.lastError) {
+          resolveLoadingMessage(runtime.lastError.message, true);
+          conversationHistory.pop();
+          return;
+        }
+
+        if (!response) {
+          resolveLoadingMessage(
+            language === 'zh' ? '未收到扩展响应，请刷新页面后重试。' : 'No extension response. Please refresh and try again.',
+            true
+          );
+          conversationHistory.pop();
+          return;
+        }
+
+        if (response.success) {
+          resolveLoadingMessage(response.reply, false);
+          conversationHistory.push({ role: 'assistant', content: response.reply });
+        } else {
+          resolveLoadingMessage(response.error, true);
+          conversationHistory.pop();
+        }
       }
-      if (response.success) {
-        resolveLoadingMessage(response.reply, false);
-        conversationHistory.push({ role: 'assistant', content: response.reply });
-      } else {
-        resolveLoadingMessage(response.error, true);
-        conversationHistory.pop();
-      }
-    }
-  );
+    );
+  } catch {
+    isPending = false;
+    setSendDisabled(false);
+    resolveLoadingMessage(
+      language === 'zh' ? '扩展上下文已失效，请刷新页面后重试。' : 'Extension context is invalid. Please refresh and try again.',
+      true
+    );
+    conversationHistory.pop();
+  }
 }
 
 function sendFollowup() {
