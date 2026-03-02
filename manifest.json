@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Research Explainer",
+  "description": "Highlight any text to get AI explanations for research terms and jargon",
+  "version": "1.0",
+  "permissions": ["storage", "clipboardRead"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "all_frames": true
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Research Explainer Settings"
+  }
+}

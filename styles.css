@@ -1,0 +1,228 @@
+/* ── Explain button ─────────────────────────────────────────────────────── */
+.re-explain-btn {
+  position: absolute;
+  z-index: 2147483647;
+  background: #6D28D9;
+  color: #fff;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(109, 40, 217, 0.35);
+  user-select: none;
+  white-space: nowrap;
+  transition: background 0.12s, transform 0.1s;
+  pointer-events: all;
+}
+.re-explain-btn:hover {
+  background: #5B21B6;
+  transform: translateY(-1px);
+}
+
+/* ── Panel shell ────────────────────────────────────────────────────────── */
+.re-panel {
+  position: absolute;
+  z-index: 2147483646;
+  background: #fff;
+  border: 1px solid #E5E7EB;
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.13), 0 2px 8px rgba(0,0,0,0.06);
+  width: 400px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  pointer-events: all;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+.re-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 14px;
+  background: #F5F3FF;
+  border-bottom: 1px solid #EDE9FE;
+  flex-shrink: 0;
+}
+.re-icon {
+  color: #7C3AED;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.re-term {
+  font-size: 12px;
+  font-weight: 600;
+  color: #4C1D95;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.re-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+  color: #9CA3AF;
+  line-height: 1;
+  padding: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.1s, color 0.1s;
+}
+.re-close:hover { background: #E5E7EB; color: #374151; }
+
+/* ── Language toggle ────────────────────────────────────────────────────── */
+.re-lang-toggle {
+  display: flex;
+  gap: 2px;
+  background: #EDE9FE;
+  border-radius: 7px;
+  padding: 2px;
+  flex-shrink: 0;
+}
+.re-lang {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  color: #7C3AED;
+  padding: 3px 9px;
+  border-radius: 5px;
+  transition: background 0.1s, color 0.1s;
+  font-family: inherit;
+}
+.re-lang.active {
+  background: #7C3AED;
+  color: #fff;
+}
+.re-lang:not(.active):hover {
+  background: #DDD6FE;
+}
+
+/* ── Conversation area ──────────────────────────────────────────────────── */
+.re-conversation {
+  flex: 1;
+  padding: 14px;
+  overflow-y: auto;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 60px;
+}
+
+/* ── Messages ───────────────────────────────────────────────────────────── */
+.re-msg {
+  font-size: 13.5px;
+  line-height: 1.65;
+  max-width: 100%;
+}
+
+/* AI message */
+.re-msg-ai {
+  color: #1F2937;
+}
+.re-msg-ai p       { margin: 0 0 8px 0; }
+.re-msg-ai p:last-child { margin-bottom: 0; }
+.re-msg-ai strong  { font-weight: 600; color: #111827; }
+.re-msg-ai code {
+  background: #F3F4F6;
+  color: #7C3AED;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+}
+
+/* User bubble */
+.re-msg-user {
+  background: #F5F3FF;
+  color: #4C1D95;
+  padding: 8px 12px;
+  border-radius: 12px 12px 4px 12px;
+  font-size: 13px;
+  align-self: flex-end;
+  max-width: 88%;
+  word-break: break-word;
+}
+
+/* Error */
+.re-msg-error {
+  color: #DC2626;
+  font-size: 13px;
+}
+
+/* Loading */
+.re-msg-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #9CA3AF;
+  font-size: 13px;
+}
+
+/* ── Spinner ─────────────────────────────────────────────────────────────── */
+.re-spinner {
+  width: 15px;
+  height: 15px;
+  border: 2px solid #EDE9FE;
+  border-top-color: #7C3AED;
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: re-spin 0.65s linear infinite;
+}
+@keyframes re-spin { to { transform: rotate(360deg); } }
+
+/* ── Follow-up input area ───────────────────────────────────────────────── */
+.re-input-area {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid #F3F4F6;
+  flex-shrink: 0;
+}
+.re-followup-input {
+  flex: 1;
+  border: 1px solid #E5E7EB;
+  border-radius: 10px;
+  padding: 7px 11px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #1F2937;
+  outline: none;
+  background: #FAFAFA;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.re-followup-input:focus {
+  border-color: #7C3AED;
+  box-shadow: 0 0 0 3px rgba(124,58,237,0.1);
+  background: #fff;
+}
+.re-send-btn {
+  background: #7C3AED;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  width: 34px;
+  height: 34px;
+  cursor: pointer;
+  font-size: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.12s;
+}
+.re-send-btn:hover   { background: #6D28D9; }
+.re-send-btn:disabled { background: #DDD6FE; cursor: not-allowed; }
